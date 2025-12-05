@@ -2,6 +2,8 @@
 
 **Ultimo aggiornamento:** 5 Dicembre 2025
 
+> 🧪 **Test sincronizzazione automatica** - 5 Dic 2025
+
 ---
 
 ## PHASE 1 — Stabilità del Realtime System ✅ COMPLETATA
