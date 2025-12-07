@@ -1,12 +1,12 @@
 # S4RA Technical Architecture
 
-**Ultimo aggiornamento:** 5 Dicembre 2025
+**Ultimo aggiornamento:** 7 Dicembre 2025
 
 ## Overview
 S4RA usa:
 - WebRTC per connessione audio real-time
-- OpenAI Realtime API
-- Server VAD (turn detection)
+- OpenAI Realtime API (GA)
+- Server VAD (turn detection gestito da OpenAI)
 - Prompt-first architecture (logica nel prompt, non nel codice)
 
 ---
@@ -49,19 +49,20 @@ OpenAI Realtime API
 2. useS4RA.connect() → fetch ephemeral key da /api/realtime/key
 3. S4RAClient.connect() → WebRTC handshake con OpenAI
 4. datachannel.open → session.update con prompt S4RA
-5. Trigger response.create → S4RA saluta in italiano
-6. Mic attivato automaticamente dopo 3 secondi
-7. Conversazione gestita dal prompt (3 fasi)
+5. conversation.item.create + response.create → S4RA saluta in italiano
+6. Mic attivato automaticamente dopo 5 secondi
+7. Conversazione gestita dal prompt (fasi multiple)
 ```
 
 ---
 
 # 4. Struttura del System Prompt
 
-Il prompt in `S4RAClient.ts` è diviso in 3 fasi:
+Il prompt in `S4RAClient.ts` è diviso in sezioni:
 
 ### PHASE 1: ONBOARDING
 - Saluto in ITALIANO
+- Aspetta conferma utente ("Sei pronto?")
 - 3-4 domande in INGLESE (senza correzioni)
 - Solo ascolto, niente follow-up
 
@@ -76,34 +77,36 @@ Il prompt in `S4RAClient.ts` è diviso in 3 fasi:
 - Correzioni solo per errori che bloccano comprensione
 - Scenari basati sul livello (A1-C1)
 
+### SILENCE HANDLING
+- Se utente non risponde, S4RA continua naturalmente
+- Prompt gentili ("Take your time", "No rush")
+- Durante roleplay, continua lo scenario
+
+### END OF SCENARIO
+- Feedback SEMPRE in ITALIANO
+- Proposta nuovo scenario in ITALIANO
+
 ---
 
-# 5. Configurazione Audio (AGGIORNATA)
+# 5. Configurazione Session Update (API GA)
 
 ```javascript
-audio: {
-  input: {
-    format: { type: "audio/pcm", rate: 24000 },
-    transcription: { model: "gpt-4o-mini-transcribe" },
-    turn_detection: {
-      type: "server_vad",
-      threshold: 0.45,
-      prefix_padding_ms: 600,
-      silence_duration_ms: 1600,
-      create_response: true,
-      interrupt_response: true,
-    },
-  },
-  output: {
-    format: { type: "audio/pcm", rate: 24000 },
-    voice: "alloy",
-    speed: 1.0,
-  },
+{
+  type: "session.update",
+  session: {
+    type: "realtime",
+    instructions: S4RA_SYSTEM_PROMPT
+  }
 }
 ```
 
-### ⚠️ Parametri da NON usare:
-- `idle_timeout_ms` — non supportato, causa malfunzionamenti
+⚠️ **L'API GA NON accetta altri parametri come:**
+- `voice`
+- `input_audio_format`
+- `output_audio_format`
+- `input_audio_transcription`
+- `turn_detection`
+- `modalities`
 
 ---
 
@@ -124,6 +127,8 @@ type SessionState =
 
 | Evento | Azione |
 |--------|--------|
+| `session.created` | Log conferma |
+| `session.updated` | Log conferma |
 | `conversation.item.input_audio_transcription.delta` | Buffer user transcript |
 | `conversation.item.input_audio_transcription.completed` | Emit user transcript |
 | `response.audio_transcript.delta` | Buffer assistant transcript |
@@ -140,8 +145,7 @@ type SessionState =
 ```
 app/
 ├── api/
-│   ├── realtime/key/route.ts    # Ephemeral key
-│   └── ...
+│   └── realtime/key/route.ts    # Ephemeral key
 ├── session/page.tsx              # Pagina principale
 └── ...
 

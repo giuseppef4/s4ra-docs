@@ -2,7 +2,7 @@
 
 Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni.
 
-**Ultimo aggiornamento:** 5 Dicembre 2025
+**Ultimo aggiornamento:** 7 Dicembre 2025
 
 ---
 
@@ -54,7 +54,7 @@ Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni
 ## 6. Flusso onboarding non strutturato
 **Stato:** ✅ RISOLTO
 
-**Soluzione:** Prompt diviso in 3 fasi:
+**Soluzione:** Prompt diviso in fasi:
 1. PHASE 1: Onboarding (saluto italiano + 3-4 domande inglese)
 2. PHASE 2: Level Assessment (valutazione in italiano)
 3. PHASE 3: Scenario Practice (roleplay in inglese)
@@ -82,21 +82,11 @@ Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni
 ## 9. idle_timeout_ms causava malfunzionamenti
 **Stato:** ✅ RISOLTO (5 Dic 2025)
 
-**Problema:** Aggiungere `idle_timeout_ms: 30000` al turn_detection causava comportamenti imprevedibili (S4RA non seguiva il piano, si interrompeva).
+**Problema:** Aggiungere `idle_timeout_ms: 30000` al turn_detection causava comportamenti imprevedibili.
 
 **Causa:** `idle_timeout_ms` non è un parametro standard dell'API Realtime di OpenAI.
 
-**Soluzione:** Rimosso il parametro. VAD settings funzionanti:
-```javascript
-turn_detection: {
-  type: "server_vad",
-  threshold: 0.45,
-  prefix_padding_ms: 600,
-  silence_duration_ms: 1600,
-  create_response: true,
-  interrupt_response: true,
-}
-```
+**Soluzione:** Rimosso il parametro.
 
 ---
 
@@ -113,6 +103,60 @@ turn_detection: {
 
 ---
 
+## 11. session.update con formato sbagliato
+**Stato:** ✅ RISOLTO (7 Dic 2025)
+
+**Problema:** L'API Realtime GA richiede un formato specifico per `session.update`. Molti parametri (voice, input_audio_format, turn_detection, etc.) non sono più accettati.
+
+**Soluzione:** Formato minimo funzionante:
+```javascript
+{
+  type: "session.update",
+  session: {
+    type: "realtime",
+    instructions: S4RA_SYSTEM_PROMPT
+  }
+}
+```
+
+---
+
+## 12. S4RA non aspettava "Sei pronto?"
+**Stato:** ✅ RISOLTO (7 Dic 2025)
+
+**Problema:** S4RA iniziava le domande senza aspettare la conferma dell'utente.
+
+**Soluzione:** Prompt aggiornato con "AND WAIT for their response" e "WAIT for their response before proceeding".
+
+---
+
+## 13. Feedback finale in inglese invece che italiano
+**Stato:** ✅ RISOLTO (7 Dic 2025)
+
+**Problema:** Alla fine dello scenario, S4RA dava feedback in inglese.
+
+**Soluzione:** Aggiunta sezione "END OF SCENARIO" nel prompt con regola esplicita di dare feedback in ITALIANO.
+
+---
+
+## 14. Balbettio iniziale
+**Stato:** ✅ RISOLTO (7 Dic 2025)
+
+**Problema:** Il mic si attivava troppo presto mentre S4RA stava ancora parlando.
+
+**Soluzione:** Delay mic aumentato da 3s a 5s.
+
+---
+
+## 15. S4RA si ferma durante scenario se utente non risponde
+**Stato:** ✅ RISOLTO (7 Dic 2025)
+
+**Problema:** Se l'utente non rispondeva, S4RA restava in silenzio.
+
+**Soluzione:** Aggiunta sezione "SILENCE HANDLING" nel prompt.
+
+---
+
 # 🟧 PROBLEMI APERTI
 
 *Nessun problema aperto al momento.*
@@ -123,7 +167,7 @@ turn_detection: {
 
 - Conflitti tra Cursor e Claude Desktop
 - Modifiche non documentate in `/docs`
-- Aggiunta di parametri non standard all'API OpenAI
+- Cambiamenti API OpenAI Realtime
 
 **Mitigazione:** 
 - Aggiornare documenti nella cartella /docs del progetto dopo ogni sessione di sviluppo
@@ -131,11 +175,27 @@ turn_detection: {
 
 ---
 
-# ⚠️ PARAMETRI VAD DA NON USARE
+# ⚠️ FORMATO SESSION.UPDATE (API GA)
 
-I seguenti parametri NON sono supportati dall'API Realtime di OpenAI e causano problemi:
+L'API Realtime GA accetta SOLO questi parametri nel session.update:
 
-- `idle_timeout_ms` — causa comportamenti imprevedibili
+```javascript
+{
+  type: "session.update",
+  session: {
+    type: "realtime",  // OBBLIGATORIO
+    instructions: "..."  // Il prompt
+  }
+}
+```
+
+**Parametri NON supportati:**
+- `voice`
+- `input_audio_format`
+- `output_audio_format`
+- `input_audio_transcription`
+- `turn_detection`
+- `modalities`
 
 ---
 

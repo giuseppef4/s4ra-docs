@@ -1,6 +1,6 @@
 # S4RA Roadmap
 
-**Ultimo aggiornamento:** 5 Dicembre 2025
+**Ultimo aggiornamento:** 7 Dicembre 2025
 
 ---
 
@@ -8,12 +8,16 @@
 - [x] Fix definitivo D/4 (session.update dopo datachannel.open)
 - [x] Rimuovere logica duplicata (Sequencer eliminato)
 - [x] Architettura semplificata (S4RAClient unico)
-- [x] Prompt strutturato in 3 fasi
+- [x] Prompt strutturato in fasi
 - [x] Pronuncia "Sara" corretta
 - [x] Valutazione livello in italiano
 - [x] Fix "S4RA si ferma dopo scenario"
 - [x] Rimuovere file deprecati
-- [x] VAD settings ottimizzati (threshold 0.45, silence 1600ms)
+- [x] Fix formato session.update per API GA
+- [x] S4RA aspetta "Sei pronto?" prima di procedere
+- [x] Feedback finale in italiano
+- [x] Gestione silenzio utente
+- [x] Fix balbettio iniziale (delay mic 5s)
 - [ ] Testing su più device
 
 ---
