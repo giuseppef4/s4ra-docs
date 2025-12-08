@@ -132,8 +132,47 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 - Testing multi-device
 - UI finale (senza debug)
 - Lesson Engine
+    rileva livello
+    genera scenario
+    adatta difficoltà
+    segue obiettivi
+    monitora progressi
+    lezioni basate su scenario
+    difficoltà adattiva
+    sequenze didattiche coerenti
+    obiettivi chiari e personalizzati
 - Scoring Engine
+    accuratezza
+    fluidità
+    pronuncia
+    lessico
+    trend
+    valutazione pronuncia
+    misurazione fluidità
+    rilevazione errori grammaticali
+    trend e punteggi
 - Report sessione
+    analisi errori ricorrenti
+    suggerimenti personalizzati
+    esercizi post-sessione
+    analisi progressi e regressi
+    report di sessione
+    esercizi mirati
+    guardrail contro deviazioni di scenario
+- Evaluation
+    Automated Evaluation
+    Test su ogni rilascio
+    Coerenza del role
+    Rispetto guardrail
+    Evaluation continua
+    Logging anomalie
+    Health score
+    Evaluation manuale
+    Golden conversations
+- Guardrail
+    Livello Prompt (Nessuna politica o salute, Non uscire dal ruolo, 
+    Non criticare l’accento), Livello Backend (Filtri input/output,Rate limiting)
+    Livello Lesson Engine (Impedire deviazioni di scenario)
 
 ---
 
