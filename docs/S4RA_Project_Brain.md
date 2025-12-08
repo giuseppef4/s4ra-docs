@@ -129,9 +129,9 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 
 ### Da fare
 
-- Testing multi-device
-- UI finale (senza debug)
-- Lesson Engine
+#### - Testing multi-device
+#### - UI finale (senza debug)
+#### - Lesson Engine
     rileva livello
     genera scenario
     adatta difficoltà
@@ -141,7 +141,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
     difficoltà adattiva
     sequenze didattiche coerenti
     obiettivi chiari e personalizzati
-- Scoring Engine
+#### - Scoring Engine
     accuratezza
     fluidità
     pronuncia
@@ -151,7 +151,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
     misurazione fluidità
     rilevazione errori grammaticali
     trend e punteggi
-- Report sessione
+#### - Report sessione
     analisi errori ricorrenti
     suggerimenti personalizzati
     esercizi post-sessione
@@ -159,7 +159,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
     report di sessione
     esercizi mirati
     guardrail contro deviazioni di scenario
-- Evaluation
+#### - Evaluation
     Automated Evaluation
     Test su ogni rilascio
     Coerenza del role
@@ -169,7 +169,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
     Health score
     Evaluation manuale
     Golden conversations
-- Guardrail
+#### - Guardrail
     Livello Prompt (Nessuna politica o salute, Non uscire dal ruolo, 
     Non criticare l’accento), Livello Backend (Filtri input/output,Rate limiting)
     Livello Lesson Engine (Impedire deviazioni di scenario)
