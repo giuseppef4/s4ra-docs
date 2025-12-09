@@ -160,29 +160,24 @@ Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni
 # 🟧 PROBLEMI APERTI
 
 ## 16. VAD troppo sensibile (falsi positivi)
-**Stato:** 🟧 APERTO (8 Dic 2025)
+**Stato:** ✅ RISOLTO (8 Dic 2025)
 
-**Problema:** Il Voice Activity Detection di OpenAI rileva rumore ambientale come "speech" e triggera risposte di S4RA anche quando l'utente non ha parlato.
+**Problema originale:** Il Voice Activity Detection di OpenAI rileva rumore ambientale come "speech" e triggera risposte di S4RA anche quando l'utente non ha parlato. Il problema principale era l'echo/feedback: il microfono riprendeva l'audio di S4RA, causando loop di interruzioni.
 
 **Sintomi:**
 - `input_audio_buffer.speech_started` appare nei log senza che l'utente parli
 - S4RA risponde a "fantasmi"
-- Audio di S4RA troncato a volte
+- Audio di S4RA troncato — sequenze di `response.done` senza audio output
 
-**Causa:** Il VAD è gestito lato OpenAI. L'API GA NON accetta il parametro `turn_detection` per modificare threshold/sensibilità.
+**Soluzione implementata:**
+1. **Auto-mute del microfono** mentre S4RA parla:
+   - `output_audio_buffer.started` → `webrtc.muteMic()`
+   - `output_audio_buffer.stopped` → `webrtc.unmuteMic()`
+2. **Prompt aggiornato** con sezione dedicata (Sezione 9) per gestire rumore residuo
 
-**Tentativi falliti:**
-- Aggiungere `turn_detection` al session.update → errore "unknown_parameter"
-
-**Workaround attuali:**
-- Usare ambiente silenzioso
-- Cuffie con microfono (meno rumore captato)
-- Accettare occasionali falsi positivi
-
-**Possibili soluzioni future:**
-- Attendere che OpenAI aggiunga supporto turn_detection all'API GA
-- Implementare VAD client-side (complesso)
-- Usare WebSocket invece di WebRTC (più controllo, ma più latenza)
+**File modificati:**
+- `lib/realtime/client/WebRTCClient.ts` — aggiunti metodi `muteMic()` e `unmuteMic()`
+- `lib/realtime/client/S4RAClient.ts` — logica auto-mute in `handleRealtimeEvent()`
 
 ---
 
