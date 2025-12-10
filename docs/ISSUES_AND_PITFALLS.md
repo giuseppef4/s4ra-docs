@@ -2,7 +2,7 @@
 
 Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni.
 
-**Ultimo aggiornamento:** 7 Dicembre 2025
+**Ultimo aggiornamento:** 10 Dicembre 2025
 
 ---
 
@@ -144,7 +144,7 @@ Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni
 
 **Problema:** Il mic si attivava troppo presto mentre S4RA stava ancora parlando.
 
-**Soluzione:** Delay mic aumentato da 3s a 5s.
+**Soluzione:** Mic si attiva automaticamente dopo il primo `output_audio_buffer.stopped`.
 
 ---
 
@@ -157,39 +157,86 @@ Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni
 
 ---
 
-# 🟧 PROBLEMI APERTI
+## 16. VAD troppo sensibile / Echo feedback
+**Stato:** ✅ RISOLTO (10 Dic 2025)
 
-## 16. VAD troppo sensibile (falsi positivi)
-**Stato:** ✅ RISOLTO (8 Dic 2025)
-
-**Problema originale:** Il Voice Activity Detection di OpenAI rileva rumore ambientale come "speech" e triggera risposte di S4RA anche quando l'utente non ha parlato. Il problema principale era l'echo/feedback: il microfono riprendeva l'audio di S4RA, causando loop di interruzioni.
+**Problema originale:** Il Voice Activity Detection di OpenAI rileva rumore ambientale come "speech" e triggera risposte di S4RA anche quando l'utente non ha parlato. Approccio mute/unmute creava esperienza "robotica".
 
 **Sintomi:**
 - `input_audio_buffer.speech_started` appare nei log senza che l'utente parli
 - S4RA risponde a "fantasmi"
-- Audio di S4RA troncato — sequenze di `response.done` senza audio output
+- Audio di S4RA troncato
+- Esperienza meccanica "puoi parlare / non puoi parlare"
 
-**Soluzione implementata:**
-1. **Auto-mute del microfono** mentre S4RA parla:
-   - `output_audio_buffer.started` → `webrtc.muteMic()`
-   - `output_audio_buffer.stopped` → `webrtc.unmuteMic()`
-2. **Prompt aggiornato** con sezione dedicata (Sezione 9) per gestire rumore residuo
-
-**File modificati:**
-- `lib/realtime/client/WebRTCClient.ts` — aggiunti metodi `muteMic()` e `unmuteMic()`
-- `lib/realtime/client/S4RAClient.ts` — logica auto-mute in `handleRealtimeEvent()`
+**Soluzione finale:**
+- **Rimosso sistema mute/unmute** - mic sempre attivo dopo primo greeting
+- **Conversazione naturale** - utente può interrompere S4RA (come Alexa/Siri)
+- **System Prompt rafforzato (Sezione 9)** - istruzioni aggressive per ignorare rumore:
+  - "Take your time" max UNA volta per sessione
+  - Default: STARE IN SILENZIO se input dubbio
+  - Mai reagire a suoni brevi/echo
 
 ---
 
-# 🟦 RISCHI FUTURI
+## 17. Mic si accendeva troppo presto (durante saluto S4RA)
+**Stato:** ✅ RISOLTO (9 Dic 2025)
 
-- Conflitti tra Cursor e Claude Desktop
-- Modifiche non documentate in `/docs`
-- Cambiamenti API OpenAI Realtime
+**Problema:** Il mic si accendeva con un timer fisso di 5 secondi dopo la connessione, ma il saluto di S4RA dura ~14 secondi.
 
-**Mitigazione:** 
-- Aggiornare documenti nella cartella /docs del progetto dopo ogni sessione di sviluppo
-- Verificare sempre la documentazione ufficiale OpenAI prima di aggiungere parametri
+**Soluzione:**
+- Rimosso il `setTimeout` dalla UI
+- Il mic si accende automaticamente in `S4RAClient.ts` dopo il primo `output_audio_buffer.stopped`
+- Flag `isFirstResponseDone` per tracciare il primo saluto
+
+---
+
+## 18. Nessun indicatore visivo di quando parlare
+**Stato:** ✅ RISOLTO poi RIMOSSO (10 Dic 2025)
+
+**Problema originale:** L'utente non sapeva quando poteva parlare.
+
+**Soluzione iniziale:** Indicatore "S4RA sta parlando..." / "Puoi parlare"
+
+**Stato attuale:** Indicatore RIMOSSO perché con approccio "conversazione naturale" non serve più - il mic è sempre attivo e l'utente può sempre parlare/interrompere.
+
+---
+
+## 19. Transcript utente non disponibile (WebRTC limitation)
+**Stato:** ✅ RISOLTO (10 Dic 2025)
+
+**Problema:** L'API Realtime GA via WebRTC NON supporta `input_audio_transcription`. Il parametro viene rifiutato con errore `unknown_parameter`.
+
+**Test eseguiti:**
+- `/v1/realtime/sessions` (WebSocket): ✅ Supporta `input_audio_transcription`
+- `/v1/realtime/client_secrets` (WebRTC): ❌ Rifiuta con "unknown_parameter"
+
+**Soluzione implementata: Hybrid Mode**
+- WebRTC per conversazione vocale
+- Whisper API in parallelo per trascrizione utente
+- `AudioTranscriber.ts` cattura audio dal mic
+- `/api/transcribe` proxy verso Whisper API
+
+**File creati:**
+- `lib/realtime/client/AudioTranscriber.ts`
+- `app/api/transcribe/route.ts`
+
+---
+
+# 🟧 PROBLEMI APERTI
+
+## 20. Whisper hallucinations su silenzio
+**Stato:** 🟡 PARZIALMENTE RISOLTO
+
+**Problema:** Quando Whisper riceve silenzio/rumore, inventa testo ("Hello.", ".", "stop it.", etc.)
+
+**Mitigazioni implementate:**
+- Filtro pattern comuni in `AudioTranscriber.ts`
+- Threshold volume minimo per inviare audio
+- `hadRealSound` flag
+
+**Da migliorare:**
+- Confidence score da Whisper (verbose_json)
+- Threshold più aggressivi
 
 ---
 
@@ -221,11 +268,16 @@ L'API Realtime GA accetta SOLO questi parametri nel session.update:
 
 ```
 components/VoiceChat/
-├── MicPulse.tsx          ✅ Attivo
-└── S4RAVoiceChat.tsx     ✅ Attivo
+├── MicPulse.tsx              ✅ Attivo
+└── S4RAVoiceChat.tsx         ✅ Attivo
 
 lib/realtime/client/
-├── S4RAClient.ts         ✅ Attivo
-├── WebRTCClient.ts       ✅ Attivo
-└── useS4RA.ts            ✅ Attivo
+├── S4RAClient.ts             ✅ Attivo (Client + System Prompt)
+├── WebRTCClient.ts           ✅ Attivo
+├── AudioTranscriber.ts       ✅ Attivo (Hybrid Mode)
+└── useS4RA.ts                ✅ Attivo
+
+app/api/
+├── realtime/key/route.ts     ✅ Attivo (Ephemeral key)
+└── transcribe/route.ts       ✅ Attivo (Whisper proxy)
 ```

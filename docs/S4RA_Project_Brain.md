@@ -1,6 +1,6 @@
 # S4RA Project Brain — Master Document
 
-**Ultimo aggiornamento:** 7 Dicembre 2025
+**Ultimo aggiornamento:** 10 Dicembre 2025
 
 ## 1. Visione del Progetto
 
@@ -69,7 +69,10 @@ S4RA parla sempre **in inglese**, tranne:
 
 ## 3. Architettura Realtime (attuale)
 
-### WebRTC
+### WebRTC + Hybrid Mode
+
+- **WebRTC:** Comunicazione vocale bidirezionale con OpenAI Realtime API
+- **Whisper API (Hybrid Mode):** Trascrizione utente in parallelo (perché WebRTC non supporta `input_audio_transcription`)
 
 Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 
@@ -85,7 +88,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 }
 ```
 
-⚠️ L'API GA non accetta parametri aggiuntivi come voice, turn_detection, etc.
+⚠️ L'API GA non accetta parametri aggiuntivi come voice, turn_detection, input_audio_transcription, etc.
 
 ---
 
@@ -95,7 +98,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 - Animazione MicPulse quando mic attivo
 - Transcript collassabile con bottone "Copy Transcript"
 - Debug log panel con bottone "Copy All"
-- Delay mic: 5 secondi dopo connessione
+- **Conversazione naturale:** mic sempre attivo, utente può interrompere
 
 ---
 
@@ -111,7 +114,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 
 ---
 
-## 6. Stato Reale Oggi (7 Dic 2025)
+## 6. Stato Reale Oggi (10 Dic 2025)
 
 ### Funziona ✅
 
@@ -125,7 +128,10 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 - Roleplay automatico dopo assessment
 - Gestione silenzio utente
 - Feedback finale in italiano
-- No balbettio iniziale
+- **Conversazione naturale** (mic sempre attivo, niente mute/unmute meccanico)
+- **Utente può interrompere** S4RA
+- **Hybrid Mode:** Trascrizione utente via Whisper API
+- **Gestione rumore/VAD** via System Prompt (sezione 9)
 
 ### Da fare
 
@@ -170,8 +176,8 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
     Evaluation manuale
     Golden conversations
 #### - Guardrail
-    Livello Prompt (Nessuna politica o salute, Non uscire dal ruolo, 
-    Non criticare l’accento), Livello Backend (Filtri input/output,Rate limiting)
+    Livello Prompt (Nessuna politica o salute, Non uscire dal ruolo, 
+    Non criticare l'accento), Livello Backend (Filtri input/output, Rate limiting)
     Livello Lesson Engine (Impedire deviazioni di scenario)
 
 ---
@@ -184,6 +190,7 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 - S4RA sempre nel ruolo
 - semplicità prima di tutto
 - mai usare parametri API non documentati
+- **conversazione naturale** (no mute/unmute meccanico)
 
 ---
 
@@ -192,14 +199,17 @@ Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
 ```
 app/
 ├── session/page.tsx          # Pagina principale sessione
-└── api/realtime/key/         # Ephemeral key endpoint
+└── api/
+    ├── realtime/key/         # Ephemeral key endpoint
+    └── transcribe/           # Whisper API proxy (Hybrid Mode)
 
 components/VoiceChat/
 ├── MicPulse.tsx              # Animazione microfono
 └── S4RAVoiceChat.tsx         # UI principale
 
 lib/realtime/client/
-├── S4RAClient.ts             # Client + System Prompt
+├── S4RAClient.ts             # Client + System Prompt + AudioTranscriber
 ├── WebRTCClient.ts           # Layer WebRTC
+├── AudioTranscriber.ts       # Cattura audio utente per Whisper
 └── useS4RA.ts                # React hook
 ```
