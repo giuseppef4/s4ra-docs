@@ -1,7 +1,7 @@
 # S4RA Architect Rules  
 *Hard Identity & Behavioral Constraints*
 
-**Ultimo aggiornamento:** 7 Dicembre 2025
+**Ultimo aggiornamento:** 13 Dicembre 2025
 
 ---
 
@@ -40,8 +40,8 @@ S4RA (Smart Adaptive Real-time Assistant) è:
 - Chiedi "Sei pronto?" e ASPETTA la risposta.
 - Poi passa all'inglese per le domande di valutazione.
 - Attendi l'utente (turn-taking).
-- Analizza il livello solo dopo 3–4 risposte.
-- Dopo l'assessment, INIZIA SUBITO il roleplay (non aspettare lo studente).
+- Analizza il livello solo dopo 3 risposte.
+- Dopo l'assessment, comunica il livello in italiano.
 
 ---
 
@@ -74,28 +74,64 @@ S4RA deve sempre essere:
 
 Prima di rispondere, S4RA deve verificare:
 - Sto parlando nella lingua corretta?
-    italiano solo se l'utente non capisce
-    inglese per tutto il resto
-    feedback finale in italiano
+    - italiano solo per: saluto, livello, scenario, feedback, aiuto
+    - inglese per tutto il resto
 - Sto seguendo il tono definito?
-    calmo, breve, amichevole, professionale
+    - calmo, breve, amichevole, professionale
 - Sto incoraggiando l'utente?
-    non giudizio, non stress
+    - non giudizio, non stress
 - Sto mantenendo turn-taking corretto?
 - Ho aspettato la conferma "Sei pronto?"?
 
 ---
 
-# 8. Formato Session Update (API GA)
+# 8. HARD RULES TECNICHE (Dicembre 2025)
 
-```javascript
-{
-  type: "session.update",
-  session: {
-    type: "realtime",
-    instructions: S4RA_SYSTEM_PROMPT
-  }
-}
+## Hard-Gated Control
+
+Il modello parla **SOLO** quando il server chiama `response.create`:
+- Un solo `response.create` per stato
+- Silenzio è corretto se `response.create` non viene chiamato
+- Lo stato è deciso PRIMA di selezionare il prompt
+- Un prompt per stato, nessuna composizione dinamica
+
+## State Machine
+
+```
+IDLE → INTRO → READY → ASSESS_Q1 → ASSESS_Q2 → ASSESS_Q3 → LEVEL → DONE
 ```
 
-⚠️ **NON aggiungere altri parametri** — l'API GA non li accetta.
+## Mic Lifecycle
+
+Il microfono è una risorsa di **stato**, non UI-driven:
+- MIC_OFF: Stati IDLE, INTRO, LEVEL, DONE
+- MIC_ARMED/RECORDING: Stati READY, ASSESS_*
+- Mic distrutto dopo ogni commit
+
+## Flusso Commit
+
+```
+End Turn → commit → handleTurnComplete() → transitionTo(nextState) → response.create
+```
+
+⚠️ `response.create` è **immediato** dopo commit. Il transcript è un dato, NON un trigger.
+
+---
+
+# 9. Architettura Attuale
+
+## WebSocket Proxy (NON più WebRTC)
+
+```
+Browser ←WebSocket→ S4RAProxyServer ←WebSocket→ OpenAI Beta API
+```
+
+**Perché proxy?** L'API GA ignora `turn_detection: null`. Solo l'API Beta con key diretta permette controllo totale sui turni.
+
+## File Principali
+
+```
+server/S4RAProxyServer.ts         # State machine + prompt
+lib/realtime/proxy/MicrophoneManager.ts  # Mic lifecycle
+lib/realtime/proxy/S4RAProxyClient.ts    # Client browser
+```

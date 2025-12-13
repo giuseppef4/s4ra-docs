@@ -1,283 +1,243 @@
 # S4RA — Known Issues & Pitfalls
 
-Questo documento raccoglie i problemi noti del progetto e le possibili soluzioni.
+Questo documento raccoglie i problemi noti del progetto e le soluzioni implementate.
 
-**Ultimo aggiornamento:** 10 Dicembre 2025
+**Ultimo aggiornamento:** 13 Dicembre 2025
 
 ---
 
 # 🟩 PROBLEMI RISOLTI
 
-## 1. D/4 — Race condition session.update
-**Stato:** ✅ RISOLTO
+## 1-18. Problemi Legacy WebRTC (Dic 2025)
 
-**Problema originale:**
-- l'AI continuava in inglese anche quando doveva parlare in italiano
-- onboarding non sincronizzato
-- transcript delta mancanti
+Tutti i problemi relativi all'architettura WebRTC sono stati risolti con la migrazione a **WebSocket Proxy**.
 
-**Soluzione implementata:**
-- Architettura semplificata con `S4RAClient.ts` unico
-- Un solo `session.update` dopo `datachannel.open`
-- Eliminato il Sequencer (logica spostata nel prompt)
+Vedi sezione "Architettura Legacy" per riferimento storico.
 
 ---
 
-## 2. Errori "conversation_already_has_active_response"
-**Stato:** ✅ RISOLTO
+## 19. API GA vs Beta — Limitazioni turn_detection
 
-**Soluzione:** Un solo `response.create` per messaggio.
+**Stato:** ✅ RISOLTO (12-13 Dic 2025)
 
----
+**Problema:** L'API GA (ephemeral key) ignora `turn_detection: null`. Il VAD resta sempre attivo, impossibile controllare i turni.
 
-## 3. Doppio onboarding
-**Stato:** ✅ RISOLTO
+**Scoperta:**
+- Ephemeral key da `openai.realtime.clientSecrets.create()` → API GA → limitazioni
+- API Beta richiede: header `OpenAI-Beta: realtime=v1` + API key diretta
 
-**Soluzione:** Logica onboarding nel prompt, non più nel codice.
+**Soluzione:** Architettura proxy server-side:
+```
+Browser ←WebSocket→ ProxyServer ←WebSocket→ OpenAI Beta API
+```
 
----
-
-## 4. "Solo inglese" all'avvio
-**Stato:** ✅ RISOLTO
-
-**Soluzione:** `session.update` è il primo evento dopo `datachannel.open`.
+Il server usa l'API key direttamente con header Beta, permettendo `turn_detection: null`.
 
 ---
 
-## 5. Pronuncia "S4RA" come "S-4-R-A"
-**Stato:** ✅ RISOLTO
+## 20. Modello parla senza controllo
 
-**Soluzione:** Nel prompt: `pronounced "Sara", not "S-four-R-A"`
+**Stato:** ✅ RISOLTO (12-13 Dic 2025)
 
----
+**Problema:** Con VAD attivo, il modello risponde automaticamente a qualsiasi input audio.
 
-## 6. Flusso onboarding non strutturato
-**Stato:** ✅ RISOLTO
-
-**Soluzione:** Prompt diviso in fasi:
-1. PHASE 1: Onboarding (saluto italiano + 3-4 domande inglese)
-2. PHASE 2: Level Assessment (valutazione in italiano)
-3. PHASE 3: Scenario Practice (roleplay in inglese)
+**Soluzione:** Hard-gated control:
+- `turn_detection: null` disabilita VAD
+- Il modello parla SOLO quando il server chiama `response.create`
+- Ogni risposta è tracciabile a uno specifico stato
 
 ---
 
-## 7. S4RA si ferma dopo "Inizio io..."
-**Stato:** ✅ RISOLTO
+## 21. Audio buffer sempre vuoto (0 chunks)
 
-**Problema:** Dopo aver spiegato lo scenario in italiano, S4RA diceva "Inizio io..." ma non continuava.
+**Stato:** ✅ RISOLTO (13 Dic 2025)
 
-**Soluzione:** Prompt aggiornato con istruzione esplicita: "Then IMMEDIATELY say your first line IN ENGLISH. Do NOT wait for the student to speak first. YOU start the roleplay."
+**Problema:** `[Mic] Committing 0 chunks` — il mic era ARMED ma non passava mai a RECORDING.
 
----
+**Causa:** `startRecording()` veniva chiamato con `setTimeout` ma i frame audio arrivavano prima.
 
-## 8. UI transcript non sempre coerente
-**Stato:** ✅ RISOLTO
-
-**Soluzione:** Buffer separati per user e assistant transcript. Gestione corretta di entrambi gli eventi:
-- `response.audio_transcript.delta`
-- `response.output_audio_transcript.delta`
-
----
-
-## 9. idle_timeout_ms causava malfunzionamenti
-**Stato:** ✅ RISOLTO (5 Dic 2025)
-
-**Problema:** Aggiungere `idle_timeout_ms: 30000` al turn_detection causava comportamenti imprevedibili.
-
-**Causa:** `idle_timeout_ms` non è un parametro standard dell'API Realtime di OpenAI.
-
-**Soluzione:** Rimosso il parametro.
-
----
-
-## 10. File deprecati nel progetto
-**Stato:** ✅ RISOLTO (5 Dic 2025)
-
-**File rimossi:**
-- `app/daily-session/` (duplicato di `/session`)
-- `lib/debug/` (file di debug non necessari)
-- `components/VoiceChat/VoiceChatContainer.tsx`
-- `components/VoiceChat/Controls.tsx`
-- `components/VoiceChat/MessageBubble.tsx`
-- `components/VoiceChat/Transcript.tsx`
-
----
-
-## 11. session.update con formato sbagliato
-**Stato:** ✅ RISOLTO (7 Dic 2025)
-
-**Problema:** L'API Realtime GA richiede un formato specifico per `session.update`. Molti parametri (voice, input_audio_format, turn_detection, etc.) non sono più accettati.
-
-**Soluzione:** Formato minimo funzionante:
-```javascript
-{
-  type: "session.update",
-  session: {
-    type: "realtime",
-    instructions: S4RA_SYSTEM_PROMPT
-  }
+**Soluzione:** Auto-transition da MIC_ARMED a MIC_RECORDING al primo frame audio:
+```typescript
+if (this.micState === "MIC_ARMED") {
+  this.setMicState("MIC_RECORDING");
 }
 ```
 
 ---
 
-## 12. S4RA non aspettava "Sei pronto?"
-**Stato:** ✅ RISOLTO (7 Dic 2025)
+## 22. AudioContext suspended (autoplay policy)
 
-**Problema:** S4RA iniziava le domande senza aspettare la conferma dell'utente.
+**Stato:** ✅ RISOLTO (13 Dic 2025)
 
-**Soluzione:** Prompt aggiornato con "AND WAIT for their response" e "WAIT for their response before proceeding".
+**Problema:** I probe audio non comparivano nei log. L'AudioContext restava in stato "suspended".
 
----
-
-## 13. Feedback finale in inglese invece che italiano
-**Stato:** ✅ RISOLTO (7 Dic 2025)
-
-**Problema:** Alla fine dello scenario, S4RA dava feedback in inglese.
-
-**Soluzione:** Aggiunta sezione "END OF SCENARIO" nel prompt con regola esplicita di dare feedback in ITALIANO.
+**Soluzione:** Resume esplicito dopo creazione:
+```typescript
+if (this.audioContext.state === "suspended") {
+  await this.audioContext.resume();
+}
+```
 
 ---
 
-## 14. Balbettio iniziale
-**Stato:** ✅ RISOLTO (7 Dic 2025)
+## 23. AudioWorklet non invia frame
 
-**Problema:** Il mic si attivava troppo presto mentre S4RA stava ancora parlando.
+**Stato:** ✅ RISOLTO (13 Dic 2025)
 
-**Soluzione:** Mic si attiva automaticamente dopo il primo `output_audio_buffer.stopped`.
+**Problema:** Worklet "alive" ma nessun frame audio.
 
----
+**Causa:** Il `process()` del worklet non riceveva input data.
 
-## 15. S4RA si ferma durante scenario se utente non risponde
-**Stato:** ✅ RISOLTO (7 Dic 2025)
+**Soluzione:** Verificato wiring corretto:
+```typescript
+const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+source.connect(this.workletNode);
+```
 
-**Problema:** Se l'utente non rispondeva, S4RA restava in silenzio.
-
-**Soluzione:** Aggiunta sezione "SILENCE HANDLING" nel prompt.
-
----
-
-## 16. VAD troppo sensibile / Echo feedback
-**Stato:** ✅ RISOLTO (10 Dic 2025)
-
-**Problema originale:** Il Voice Activity Detection di OpenAI rileva rumore ambientale come "speech" e triggera risposte di S4RA anche quando l'utente non ha parlato. Approccio mute/unmute creava esperienza "robotica".
-
-**Sintomi:**
-- `input_audio_buffer.speech_started` appare nei log senza che l'utente parli
-- S4RA risponde a "fantasmi"
-- Audio di S4RA troncato
-- Esperienza meccanica "puoi parlare / non puoi parlare"
-
-**Soluzione finale:**
-- **Rimosso sistema mute/unmute** - mic sempre attivo dopo primo greeting
-- **Conversazione naturale** - utente può interrompere S4RA (come Alexa/Siri)
-- **System Prompt rafforzato (Sezione 9)** - istruzioni aggressive per ignorare rumore:
-  - "Take your time" max UNA volta per sessione
-  - Default: STARE IN SILENZIO se input dubbio
-  - Mai reagire a suoni brevi/echo
+Aggiunto logging di debug nel worklet per tracciare il flusso.
 
 ---
 
-## 17. Mic si accendeva troppo presto (durante saluto S4RA)
-**Stato:** ✅ RISOLTO (9 Dic 2025)
+## 24. response.create dipendeva dal transcript
 
-**Problema:** Il mic si accendeva con un timer fisso di 5 secondi dopo la connessione, ma il saluto di S4RA dura ~14 secondi.
+**Stato:** ✅ RISOLTO (13 Dic 2025)
 
-**Soluzione:**
-- Rimosso il `setTimeout` dalla UI
-- Il mic si accende automaticamente in `S4RAClient.ts` dopo il primo `output_audio_buffer.stopped`
-- Flag `isFirstResponseDone` per tracciare il primo saluto
+**Problema:** Dopo "End Turn", il server aspettava `conversation.item.input_audio_transcription.completed` prima di chiamare `response.create`.
 
----
+**Correzione concettuale:**
+> End Turn = fine turno = `response.create` IMMEDIATO.
+> Il transcript è un dato, non un trigger.
 
-## 18. Nessun indicatore visivo di quando parlare
-**Stato:** ✅ RISOLTO poi RIMOSSO (10 Dic 2025)
-
-**Problema originale:** L'utente non sapeva quando poteva parlare.
-
-**Soluzione iniziale:** Indicatore "S4RA sta parlando..." / "Puoi parlare"
-
-**Stato attuale:** Indicatore RIMOSSO perché con approccio "conversazione naturale" non serve più - il mic è sempre attivo e l'utente può sempre parlare/interrompere.
-
----
-
-## 19. Transcript utente non disponibile (WebRTC limitation)
-**Stato:** ✅ RISOLTO (10 Dic 2025)
-
-**Problema:** L'API Realtime GA via WebRTC NON supporta `input_audio_transcription`. Il parametro viene rifiutato con errore `unknown_parameter`.
-
-**Test eseguiti:**
-- `/v1/realtime/sessions` (WebSocket): ✅ Supporta `input_audio_transcription`
-- `/v1/realtime/client_secrets` (WebRTC): ❌ Rifiuta con "unknown_parameter"
-
-**Soluzione implementata: Hybrid Mode**
-- WebRTC per conversazione vocale
-- Whisper API in parallelo per trascrizione utente
-- `AudioTranscriber.ts` cattura audio dal mic
-- `/api/transcribe` proxy verso Whisper API
-
-**File creati:**
-- `lib/realtime/client/AudioTranscriber.ts`
-- `app/api/transcribe/route.ts`
+**Soluzione:** `handleTurnComplete()` chiamato subito dopo `input_audio_buffer.commit`:
+```typescript
+case "commit":
+  this.sendToOpenAI({ type: "input_audio_buffer.commit" });
+  this.handleTurnComplete(); // ← IMMEDIATO
+```
 
 ---
 
 # 🟧 PROBLEMI APERTI
 
-## 20. Whisper hallucinations su silenzio
-**Stato:** 🟡 PARZIALMENTE RISOLTO
+## 25. Qualità audio playback
 
-**Problema:** Quando Whisper riceve silenzio/rumore, inventa testo ("Hello.", ".", "stop it.", etc.)
+**Stato:** ⚠️ DA RIFINIRE (non bloccante)
 
-**Mitigazioni implementate:**
-- Filtro pattern comuni in `AudioTranscriber.ts`
-- Threshold volume minimo per inviare audio
-- `hadRealSound` flag
+**Problema:** Occasionali artefatti audio durante il playback.
 
-**Da migliorare:**
-- Confidence score da Whisper (verbose_json)
-- Threshold più aggressivi
+**Causa probabile:** Chunk scheduling non perfetto o mismatch sample rate.
+
+**Mitigazioni:**
+- Seamless scheduling con `source.start(scheduledTime)`
+- Reset playback su nuovi stati
 
 ---
 
-# ⚠️ FORMATO SESSION.UPDATE (API GA)
+## 26. Silence detection non implementata
 
-L'API Realtime GA accetta SOLO questi parametri nel session.update:
+**Stato:** 🟡 DA FARE
 
-```javascript
-{
-  type: "session.update",
-  session: {
-    type: "realtime",  // OBBLIGATORIO
-    instructions: "..."  // Il prompt
-  }
-}
-```
+**Problema:** L'utente deve cliccare "End Turn (POC only)" per chiudere il turno.
 
-**Parametri NON supportati:**
-- `voice`
-- `input_audio_format`
-- `output_audio_format`
-- `input_audio_transcription`
-- `turn_detection`
-- `modalities`
+**Soluzione futura:**
+- Client-side silence detection (N secondi di silenzio → commit automatico)
+- Oppure client-side VAD
 
 ---
 
-# 📁 STRUTTURA FILE ATTUALE
+# 📐 ARCHITETTURA ATTUALE (Dic 2025)
+
+## WebSocket Proxy
 
 ```
-components/VoiceChat/
-├── MicPulse.tsx              ✅ Attivo
-└── S4RAVoiceChat.tsx         ✅ Attivo
+Browser                    ProxyServer                 OpenAI
+   │                           │                          │
+   ├──{type:"audio"}──────────►│                          │
+   │                           ├──input_audio_buffer.append──►
+   │                           │                          │
+   ├──{type:"commit"}─────────►│                          │
+   │                           ├──input_audio_buffer.commit──►
+   │                           ├──response.create────────►│
+   │                           │                          │
+   │◄──{type:"audio"}──────────┤◄──response.audio.delta───┤
+   │◄──{type:"state"}──────────┤                          │
+   │◄──{type:"transcript"}─────┤◄──transcription.completed─┤
+```
 
+## State Machine
+
+```
+IDLE → INTRO → READY → ASSESS_Q1 → ASSESS_Q2 → ASSESS_Q3 → LEVEL → DONE
+```
+
+## Mic Lifecycle
+
+```
+State allows mic? ──► createMic() ──► MIC_ARMED
+                                          │
+                                    First audio frame
+                                          │
+                                          ▼
+                                    MIC_RECORDING
+                                          │
+                                       commit()
+                                          │
+                                          ▼
+                                    MIC_COMMITTED ──► destroyMic() ──► MIC_OFF
+```
+
+---
+
+# 📁 FILE ATTIVI
+
+```
+server/
+├── S4RAProxyServer.ts        ✅ Proxy → OpenAI Beta
+└── start-proxy.ts            ✅ Entry point
+
+lib/realtime/proxy/
+├── S4RAProxyClient.ts        ✅ Client browser
+├── MicrophoneManager.ts      ✅ State-driven mic
+└── useS4RAProxy.ts           ✅ React hook
+
+app/poc-proxy/page.tsx        ✅ UI test
+```
+
+---
+
+# 🧊 ARCHITETTURA LEGACY (WebRTC)
+
+I seguenti file sono **FROZEN** e mantenuti solo per riferimento:
+
+```
 lib/realtime/client/
-├── S4RAClient.ts             ✅ Attivo (Client + System Prompt)
-├── WebRTCClient.ts           ✅ Attivo
-├── AudioTranscriber.ts       ✅ Attivo (Hybrid Mode)
-└── useS4RA.ts                ✅ Attivo
+├── S4RAClient.ts             🧊 FROZEN
+├── WebRTCClient.ts           🧊 FROZEN
+├── AudioTranscriber.ts       🧊 FROZEN
+└── useS4RA.ts                🧊 FROZEN
 
-app/api/
-├── realtime/key/route.ts     ✅ Attivo (Ephemeral key)
-└── transcribe/route.ts       ✅ Attivo (Whisper proxy)
+app/session/page.tsx          🧊 FROZEN
 ```
+
+### Problemi risolti nell'era WebRTC (1-18)
+
+1. Race condition session.update
+2. Errori "conversation_already_has_active_response"
+3. Doppio onboarding
+4. "Solo inglese" all'avvio
+5. Pronuncia "S4RA" come "S-4-R-A"
+6. Flusso onboarding non strutturato
+7. S4RA si ferma dopo "Inizio io..."
+8. UI transcript non coerente
+9. idle_timeout_ms malfunzionamenti
+10. File deprecati
+11. session.update formato sbagliato
+12. S4RA non aspettava "Sei pronto?"
+13. Feedback finale in inglese
+14. Balbettio iniziale
+15. S4RA si ferma se utente non risponde
+16. VAD troppo sensibile / Echo feedback
+17. Mic si accendeva troppo presto
+18. Nessun indicatore visivo
+19. Transcript utente non disponibile (WebRTC limitation)
+20. Whisper hallucinations su silenzio

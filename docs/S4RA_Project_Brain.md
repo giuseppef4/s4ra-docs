@@ -1,6 +1,6 @@
 # S4RA Project Brain — Master Document
 
-**Ultimo aggiornamento:** 10 Dicembre 2025
+**Ultimo aggiornamento:** 13 Dicembre 2025
 
 ## 1. Visione del Progetto
 
@@ -67,149 +67,259 @@ S4RA parla sempre **in inglese**, tranne:
 
 ---
 
-## 3. Architettura Realtime (attuale)
+## 3. Architettura Realtime
 
-### WebRTC + Hybrid Mode
+### ⚠️ ARCHITETTURA ATTUALE: WebSocket Proxy (Dicembre 2025)
 
-- **WebRTC:** Comunicazione vocale bidirezionale con OpenAI Realtime API
-- **Whisper API (Hybrid Mode):** Trascrizione utente in parallelo (perché WebRTC non supporta `input_audio_transcription`)
+A seguito dei limiti dell'API GA WebRTC (nessun controllo su `turn_detection`), abbiamo implementato un'architettura **proxy server-side**:
 
-Endpoint: `POST https://api.openai.com/v1/realtime/calls?model=gpt-realtime`
-
-### Session Update (API GA)
-
-```javascript
-{
-  type: "session.update",
-  session: {
-    type: "realtime",
-    instructions: S4RA_SYSTEM_PROMPT
-  }
-}
+```
+Browser ←WebSocket→ S4RAProxyServer (localhost:8080) ←WebSocket→ OpenAI Beta API
+                           │
+                           └── turn_detection: null (FUNZIONA)
+                           └── response.create esplicito
+                           └── Hard-gated state machine
 ```
 
-⚠️ L'API GA non accetta parametri aggiuntivi come voice, turn_detection, input_audio_transcription, etc.
+### Perché Proxy invece di WebRTC
+
+| Aspetto | WebRTC (GA) | WebSocket Proxy (Beta) |
+|---------|-------------|------------------------|
+| `turn_detection: null` | ❌ Ignorato | ✅ Funziona |
+| Controllo turni | ❌ VAD sempre attivo | ✅ Esplicito via `response.create` |
+| API Key | Ephemeral (client-side) | Direct (server-side, sicura) |
+| Trascrizione | ❌ Non supportata | ✅ `input_audio_transcription` |
+
+### File Architettura Proxy
+
+```
+server/
+├── S4RAProxyServer.ts     # Server WebSocket proxy → OpenAI Beta
+└── start-proxy.ts         # Entry point
+
+lib/realtime/proxy/
+├── S4RAProxyClient.ts     # Client browser (dumb pipe)
+├── MicrophoneManager.ts   # Mic state-driven lifecycle
+└── useS4RAProxy.ts        # React hook
+
+app/poc-proxy/page.tsx     # UI di test POC
+```
+
+### Architettura Legacy (WebRTC) — FROZEN
+
+I file in `lib/realtime/client/` sono **congelati** con il prompt V1 per riferimento:
+
+```
+lib/realtime/client/
+├── S4RAClient.ts          # FROZEN - WebRTC legacy
+├── WebRTCClient.ts        # FROZEN - WebRTC legacy
+└── ...
+```
 
 ---
 
-## 4. UI Attuale
+## 4. Lesson Engine v0 — State Machine
 
-- Un bottone "Start Session" / "End Session"
-- Animazione MicPulse quando mic attivo
-- Transcript collassabile con bottone "Copy Transcript"
-- Debug log panel con bottone "Copy All"
-- **Conversazione naturale:** mic sempre attivo, utente può interrompere
+### Stati
+
+```
+IDLE → INTRO → READY → ASSESS_Q1 → ASSESS_Q2 → ASSESS_Q3 → LEVEL → DONE
+                │
+                └→ (not ready) → DONE
+```
+
+### Principi Hard-Gated Control
+
+1. **Il modello parla SOLO via `response.create` esplicito**
+2. **Un solo `response.create` per stato**
+3. **Silenzio è corretto se `response.create` non viene chiamato**
+4. **Lo stato è deciso PRIMA di selezionare il prompt**
+5. **Un prompt per stato, nessuna composizione dinamica**
+
+### Mapping Stato → Output
+
+| Stato | `response.create`? | Prompt |
+|-------|-------------------|--------|
+| IDLE | ❌ No | - |
+| INTRO | ✅ Sì | Saluto italiano, "Sei pronto?" |
+| READY | ❌ No | Attende input utente |
+| ASSESS_Q1 | ✅ Sì | "What do you like to do on the weekend?" |
+| ASSESS_Q2 | ✅ Sì | "Tell me about your home. What does it look like?" |
+| ASSESS_Q3 | ✅ Sì | "Why is learning English important to you?" |
+| LEVEL | ✅ Sì | Valutazione A1/A2/B1/B2 in italiano |
+| DONE | ✅ Sì | Saluto finale italiano |
+
+### Flusso Commit → Response
+
+```
+End Turn → commit → handleTurnComplete() → transitionTo(nextState) → response.create
+```
+
+**IMPORTANTE:** `response.create` viene chiamato **immediatamente** dopo il commit, NON si aspetta il transcript. Il transcript è un dato, non un trigger.
 
 ---
 
-## 5. Flusso Sessione Completo
+## 5. Voice Lifecycle (State-Driven Mic)
 
-1. **Saluto italiano** - S4RA si presenta, spiega cosa farà, chiede "Sei pronto?"
-2. **Aspetta conferma** - L'utente dice "sì", "pronto", etc.
-3. **3-4 domande inglese** - Domande semplici, nessuna correzione
-4. **Valutazione italiano** - Comunica il livello (A1-C1)
-5. **Spiegazione scenario italiano** - Descrive la situazione
-6. **Roleplay inglese** - S4RA inizia subito, gestisce silenzio
-7. **Feedback italiano** - Alla fine dello scenario
+### Principio
+
+> Il microfono esiste SOLO come conseguenza dello stato del Lesson Engine.
+> La UI NON apre né chiude il mic.
+
+### Mapping Stato → Mic
+
+| Stato | Mic State |
+|-------|-----------|
+| IDLE | MIC_OFF |
+| INTRO | MIC_OFF |
+| READY | MIC_ARMED → MIC_RECORDING |
+| ASSESS_* | MIC_ARMED → MIC_RECORDING |
+| LEVEL | MIC_OFF |
+| DONE | MIC_OFF |
+
+### Stati Mic
+
+- **MIC_OFF:** Nessun getUserMedia, nessun AudioContext, nessun buffer
+- **MIC_ARMED:** Pronto ma NON registra (attende primo frame audio)
+- **MIC_RECORDING:** Registra (auto-transition da ARMED al primo frame)
+- **MIC_COMMITTED:** Buffer congelato, mic distrutto, inviato al server
+
+### Regole
+
+1. Mic OFF di default (load, refresh, reconnect)
+2. Mic nasce solo se lo stato lo consente
+3. Mic viene SEMPRE distrutto dopo commit o cambio stato non valido
+4. Nessun audio pre-sessione
+5. Server riceve SOLO audio committed
+6. Buffer non sopravvive al mic
+
+### Formato Audio
+
+- Mono
+- PCM16 little-endian
+- 16 kHz (downsampled da browser rate)
+- Un commit per turno
 
 ---
 
-## 6. Stato Reale Oggi (10 Dic 2025)
+## 6. UI POC
+
+### Pagina di Test
+
+`/poc-proxy` — UI minimale per testare il flusso:
+
+- Bottone Start/Disconnect
+- Bottone "End Turn (POC only)" — solo per delimitare fine turno nel POC
+- Display stato Lesson Engine
+- Display stato Mic
+- Transcript
+- Debug logs con "Copy All"
+
+### Note sul Bottone End Turn
+
+> Questo bottone esiste SOLO per il POC.
+> In produzione sarà sostituito da silence detection o VAD client-side.
+> NON contiene logica di stato o chiamate OpenAI.
+> Il suo UNICO ruolo è notificare il server che il turno utente è concluso.
+
+---
+
+## 7. Stato Attuale (13 Dic 2025)
 
 ### Funziona ✅
 
-- WebRTC stabile
-- Audio bidirezionale
-- Personalità S4RA completa
-- Fallback bilingue
-- Turn-taking naturale
-- Onboarding completo
-- Aspetta "Sei pronto?"
-- Roleplay automatico dopo assessment
-- Gestione silenzio utente
-- Feedback finale in italiano
-- **Conversazione naturale** (mic sempre attivo, niente mute/unmute meccanico)
-- **Utente può interrompere** S4RA
-- **Hybrid Mode:** Trascrizione utente via Whisper API
-- **Gestione rumore/VAD** via System Prompt (sezione 9)
+- ✅ **Proxy WebSocket** → OpenAI Beta API
+- ✅ **Hard-gated control** — modello parla solo via `response.create`
+- ✅ **State machine** — INTRO → READY → ASSESS_Q1..Q3 → LEVEL → DONE
+- ✅ **State-driven mic lifecycle** — MIC_OFF/ARMED/RECORDING/COMMITTED
+- ✅ **Audio pipeline** — getUserMedia → AudioWorklet → PCM16 → base64
+- ✅ **Commit/buffering** — chunks accumulati e inviati al commit
+- ✅ **Trascrizione utente** — arriva via `input_audio_transcription`
+- ✅ **Lesson Engine v0** — 3 domande progressive + valutazione livello
+- ✅ **Debug logging** — tracciabilità completa stato → prompt → response
 
-### Da fare
+### Da Rifinire ⚠️
 
-#### - Testing multi-device
-#### - UI finale (senza debug)
-#### - Lesson Engine
-    rileva livello
-    genera scenario
-    adatta difficoltà
-    segue obiettivi
-    monitora progressi
-    lezioni basate su scenario
-    difficoltà adattiva
-    sequenze didattiche coerenti
-    obiettivi chiari e personalizzati
-#### - Scoring Engine
-    accuratezza
-    fluidità
-    pronuncia
-    lessico
-    trend
-    valutazione pronuncia
-    misurazione fluidità
-    rilevazione errori grammaticali
-    trend e punteggi
-#### - Report sessione
-    analisi errori ricorrenti
-    suggerimenti personalizzati
-    esercizi post-sessione
-    analisi progressi e regressi
-    report di sessione
-    esercizi mirati
-    guardrail contro deviazioni di scenario
-#### - Evaluation
-    Automated Evaluation
-    Test su ogni rilascio
-    Coerenza del role
-    Rispetto guardrail
-    Evaluation continua
-    Logging anomalie
-    Health score
-    Evaluation manuale
-    Golden conversations
-#### - Guardrail
-    Livello Prompt (Nessuna politica o salute, Non uscire dal ruolo, 
-    Non criticare l'accento), Livello Backend (Filtri input/output, Rate limiting)
-    Livello Lesson Engine (Impedire deviazioni di scenario)
+- ⚠️ **Qualità audio playback** — occasionali artefatti, non bloccante
+- ⚠️ **Silence detection** — da implementare per rimuovere bottone POC
+
+### Da Fare
+
+- Roleplay dopo assessment
+- Feedback dettagliato
+- Scoring engine
+- UI finale (senza debug)
+- Multi-device testing
 
 ---
 
-## 7. Principi Invarianti
+## 8. Principi Invarianti
 
-- mai rompere schema Realtime GA
-- un solo session.update
-- italiano solo per: saluto, livello, scenario, feedback, aiuto
-- S4RA sempre nel ruolo
-- semplicità prima di tutto
-- mai usare parametri API non documentati
-- **conversazione naturale** (no mute/unmute meccanico)
+- Mai modificare identità S4RA senza permesso esplicito
+- Mai codice monolitico — moduli piccoli e testabili
+- Un solo `response.create` per stato
+- Il modello parla SOLO quando il server decide
+- Silenzio è corretto se `response.create` non viene chiamato
+- Mic è una risorsa di stato, non UI-driven
+- Italiano solo per: saluto, livello, scenario, feedback, aiuto
 
 ---
 
-## 8. File Struttura Attuale
+## 9. Come Avviare
+
+### Terminale 1 — Proxy Server
+
+```bash
+npm run proxy
+```
+
+### Terminale 2 — Next.js
+
+```bash
+npm run dev
+```
+
+### Browser
 
 ```
-app/
-├── session/page.tsx          # Pagina principale sessione
-└── api/
-    ├── realtime/key/         # Ephemeral key endpoint
-    └── transcribe/           # Whisper API proxy (Hybrid Mode)
+http://localhost:3000/poc-proxy
+```
 
-components/VoiceChat/
-├── MicPulse.tsx              # Animazione microfono
-└── S4RAVoiceChat.tsx         # UI principale
+---
 
-lib/realtime/client/
-├── S4RAClient.ts             # Client + System Prompt + AudioTranscriber
-├── WebRTCClient.ts           # Layer WebRTC
-├── AudioTranscriber.ts       # Cattura audio utente per Whisper
-└── useS4RA.ts                # React hook
+## 10. File Struttura Completa
+
+```
+s4ra-tutor/
+├── server/
+│   ├── S4RAProxyServer.ts     # Proxy WebSocket → OpenAI Beta
+│   └── start-proxy.ts         # Entry point proxy
+│
+├── lib/realtime/
+│   ├── proxy/                 # ← ARCHITETTURA ATTUALE
+│   │   ├── S4RAProxyClient.ts
+│   │   ├── MicrophoneManager.ts
+│   │   └── useS4RAProxy.ts
+│   │
+│   ├── client/                # ← FROZEN (WebRTC legacy)
+│   │   ├── S4RAClient.ts
+│   │   ├── WebRTCClient.ts
+│   │   └── ...
+│   │
+│   └── websocket/             # ← POC iniziale (abbandonato)
+│       └── ...
+│
+├── app/
+│   ├── poc-proxy/page.tsx     # UI test proxy
+│   ├── session/page.tsx       # UI legacy WebRTC
+│   └── api/...
+│
+├── components/VoiceChat/
+│   └── ...                    # UI legacy
+│
+├── docs/
+│   ├── s4ra_project_brain.md  # Questo file
+│   └── ISSUES_AND_PITFALLS.md
+│
+└── CLAUDE.md
 ```
